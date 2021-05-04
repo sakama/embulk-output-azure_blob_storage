@@ -1,5 +1,6 @@
 package org.embulk.output.azure_blob_storage;
 
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
@@ -9,6 +10,7 @@ import com.microsoft.azure.storage.blob.CloudBlobClient;
 import com.microsoft.azure.storage.blob.CloudBlobContainer;
 import org.embulk.EmbulkTestRuntime;
 import org.embulk.config.ConfigDiff;
+import org.embulk.config.ConfigException;
 import org.embulk.config.ConfigSource;
 import org.embulk.config.TaskReport;
 import org.embulk.config.TaskSource;
@@ -19,12 +21,15 @@ import org.embulk.spi.FileOutputPlugin;
 import org.embulk.spi.FileOutputRunner;
 import org.embulk.spi.OutputPlugin;
 import org.embulk.spi.Schema;
-import org.embulk.standards.CsvParserPlugin;
+import org.embulk.spi.type.Type;
+import org.embulk.spi.type.Types;
 
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
+
+import static org.embulk.output.azure_blob_storage.AzureBlobStorageFileOutputPlugin.CONFIG_MAPPER;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeNotNull;
@@ -79,7 +84,8 @@ public class TestAzureBlobStorageFileOutputPlugin
     private AzureBlobStorageFileOutputPlugin plugin;
 
     @Before
-    public void createResources() throws GeneralSecurityException, NoSuchMethodException, IOException
+    public void createResources()
+        throws GeneralSecurityException, NoSuchMethodException, IOException
     {
         plugin = new AzureBlobStorageFileOutputPlugin();
         runner = new FileOutputRunner(runtime.getInstance(AzureBlobStorageFileOutputPlugin.class));
@@ -88,18 +94,18 @@ public class TestAzureBlobStorageFileOutputPlugin
     @Test
     public void checkDefaultValues()
     {
-        ConfigSource config = Exec.newConfigSource()
-                .set("in", inputConfig())
-                .set("parser", parserConfig(schemaConfig()))
-                .set("type", "azure_blob_storage")
-                .set("account_name", AZURE_ACCOUNT_NAME)
-                .set("account_key", AZURE_ACCOUNT_KEY)
-                .set("container", AZURE_CONTAINER)
-                .set("path_prefix", "my-prefix")
-                .set("file_ext", ".csv")
-                .set("formatter", formatterConfig());
+        ConfigSource config = runtime.getExec().newConfigSource()
+            .set("in", inputConfig())
+            .set("parser", parserConfig(schemaConfig()))
+            .set("type", "azure_blob_storage")
+            .set("account_name", AZURE_ACCOUNT_NAME)
+            .set("account_key", AZURE_ACCOUNT_KEY)
+            .set("container", AZURE_CONTAINER)
+            .set("path_prefix", "my-prefix")
+            .set("file_ext", ".csv")
+            .set("formatter", formatterConfig());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
+        PluginTask task = CONFIG_MAPPER.map(config, PluginTask.class);
 
         assertEquals(AZURE_ACCOUNT_NAME, task.getAccountName());
         assertEquals(AZURE_ACCOUNT_KEY, task.getAccountKey());
@@ -110,24 +116,23 @@ public class TestAzureBlobStorageFileOutputPlugin
     @Test
     public void testTransaction()
     {
-        ConfigSource config = Exec.newConfigSource()
-                .set("in", inputConfig())
-                .set("parser", parserConfig(schemaConfig()))
-                .set("type", "azure_blob_storage")
-                .set("account_name", AZURE_ACCOUNT_NAME)
-                .set("account_key", AZURE_ACCOUNT_KEY)
-                .set("container", AZURE_CONTAINER)
-                .set("path_prefix", "my-prefix")
-                .set("file_ext", ".csv")
-                .set("formatter", formatterConfig());
+        ConfigSource config = runtime.getExec().newConfigSource()
+            .set("in", inputConfig())
+            .set("parser", parserConfig(schemaConfig()))
+            .set("type", "azure_blob_storage")
+            .set("account_name", AZURE_ACCOUNT_NAME)
+            .set("account_key", AZURE_ACCOUNT_KEY)
+            .set("container", AZURE_CONTAINER)
+            .set("path_prefix", "my-prefix")
+            .set("file_ext", ".csv")
+            .set("formatter", formatterConfig());
 
-        Schema schema = config.getNested("parser").loadConfig(CsvParserPlugin.PluginTask.class).getSchemaConfig().toSchema();
-
-        runner.transaction(config, schema, 0, new Control());
+        runner.transaction(config, getSchema(config), 0, new Control());
     }
 
     @Test
-    public void testTransactionCreateNonexistsContainer() throws Exception
+    public void testTransactionCreateNonexistsContainer()
+        throws Exception
     {
         // Azure Container can't be created 30 seconds after deletion.
         String container = "non-exists-container-" + System.currentTimeMillis();
@@ -135,20 +140,18 @@ public class TestAzureBlobStorageFileOutputPlugin
 
         assertEquals(false, isExistsContainer(container));
 
-        ConfigSource config = Exec.newConfigSource()
-                .set("in", inputConfig())
-                .set("parser", parserConfig(schemaConfig()))
-                .set("type", "azure_blob_storage")
-                .set("account_name", AZURE_ACCOUNT_NAME)
-                .set("account_key", AZURE_ACCOUNT_KEY)
-                .set("container", container)
-                .set("path_prefix", "my-prefix")
-                .set("file_ext", ".csv")
-                .set("formatter", formatterConfig());
+        ConfigSource config = runtime.getExec().newConfigSource()
+            .set("in", inputConfig())
+            .set("parser", parserConfig(schemaConfig()))
+            .set("type", "azure_blob_storage")
+            .set("account_name", AZURE_ACCOUNT_NAME)
+            .set("account_key", AZURE_ACCOUNT_KEY)
+            .set("container", container)
+            .set("path_prefix", "my-prefix")
+            .set("file_ext", ".csv")
+            .set("formatter", formatterConfig());
 
-        Schema schema = config.getNested("parser").loadConfig(CsvParserPlugin.PluginTask.class).getSchemaConfig().toSchema();
-
-        runner.transaction(config, schema, 0, new Control());
+        runner.transaction(config, getSchema(config), 0, new Control());
 
         assertEquals(true, isExistsContainer(container));
         deleteContainerIfExists(container);
@@ -157,8 +160,8 @@ public class TestAzureBlobStorageFileOutputPlugin
     @Test
     public void testResume()
     {
-        PluginTask task = config().loadConfig(PluginTask.class);
-        ConfigDiff configDiff = plugin.resume(task.dump(), 0, new FileOutputPlugin.Control()
+        PluginTask task = CONFIG_MAPPER.map(config(), PluginTask.class);
+        ConfigDiff configDiff = plugin.resume(task.toTaskSource(), 0, new FileOutputPlugin.Control()
         {
             @Override
             public List<TaskReport> run(TaskSource taskSource)
@@ -172,38 +175,36 @@ public class TestAzureBlobStorageFileOutputPlugin
     @Test
     public void testCleanup()
     {
-        PluginTask task = config().loadConfig(PluginTask.class);
-        plugin.cleanup(task.dump(), 0, Lists.<TaskReport>newArrayList()); // no errors happens
+        PluginTask task = CONFIG_MAPPER.map(config(), PluginTask.class);
+        plugin.cleanup(task.toTaskSource(), 0, Lists.<TaskReport>newArrayList()); // no errors happens
     }
 
     @Test(expected = RuntimeException.class)
     public void testCreateAzureClientThrowsConfigException()
     {
-        ConfigSource config = Exec.newConfigSource()
-                .set("in", inputConfig())
-                .set("parser", parserConfig(schemaConfig()))
-                .set("type", "azure_blob_storage")
-                .set("account_name", "invalid-account-name")
-                .set("account_key", AZURE_ACCOUNT_KEY)
-                .set("container", AZURE_CONTAINER)
-                .set("path_prefix", "my-prefix")
-                .set("file_ext", ".csv")
-                .set("formatter", formatterConfig());
+        ConfigSource config = runtime.getExec().newConfigSource()
+            .set("in", inputConfig())
+            .set("parser", parserConfig(schemaConfig()))
+            .set("type", "azure_blob_storage")
+            .set("account_name", "invalid-account-name")
+            .set("account_key", AZURE_ACCOUNT_KEY)
+            .set("container", AZURE_CONTAINER)
+            .set("path_prefix", "my-prefix")
+            .set("file_ext", ".csv")
+            .set("formatter", formatterConfig());
 
-        Schema schema = config.getNested("parser").loadConfig(CsvParserPlugin.PluginTask.class).getSchemaConfig().toSchema();
-
-        runner.transaction(config, schema, 0, new Control());
+        runner.transaction(config, getSchema(config), 0, new Control());
     }
 
     @Test
-    public void testAzureFileOutputByOpen() throws Exception
+    public void testAzureFileOutputByOpen()
+        throws Exception
     {
         ConfigSource configSource = config();
-        PluginTask task = configSource.loadConfig(PluginTask.class);
-        Schema schema = configSource.getNested("parser").loadConfig(CsvParserPlugin.PluginTask.class).getSchemaConfig().toSchema();
-        runner.transaction(configSource, schema, 0, new Control());
+        PluginTask task = CONFIG_MAPPER.map(configSource, PluginTask.class);
+        runner.transaction(configSource, getSchema(configSource), 0, new Control());
 
-        AzureBlobStorageFileOutputPlugin.AzureFileOutput output = (AzureBlobStorageFileOutputPlugin.AzureFileOutput) plugin.open(task.dump(), 0);
+        AzureBlobStorageFileOutputPlugin.AzureFileOutput output = (AzureBlobStorageFileOutputPlugin.AzureFileOutput) plugin.open(task.toTaskSource(), 0);
 
         output.nextFile();
 
@@ -221,14 +222,14 @@ public class TestAzureBlobStorageFileOutputPlugin
     }
 
     @Test
-    public void testAzureFileOutputByOpenWithNonReadableFile() throws Exception
+    public void testAzureFileOutputByOpenWithNonReadableFile()
+        throws Exception
     {
         ConfigSource configSource = config();
-        PluginTask task = configSource.loadConfig(PluginTask.class);
-        Schema schema = configSource.getNested("parser").loadConfig(CsvParserPlugin.PluginTask.class).getSchemaConfig().toSchema();
-        runner.transaction(configSource, schema, 0, new Control());
+        PluginTask task = CONFIG_MAPPER.map(configSource, PluginTask.class);
+        runner.transaction(configSource, getSchema(configSource), 0, new Control());
 
-        AzureBlobStorageFileOutputPlugin.AzureFileOutput output = (AzureBlobStorageFileOutputPlugin.AzureFileOutput) plugin.open(task.dump(), 0);
+        AzureBlobStorageFileOutputPlugin.AzureFileOutput output = (AzureBlobStorageFileOutputPlugin.AzureFileOutput) plugin.open(task.toTaskSource(), 0);
 
         output.nextFile();
 
@@ -252,14 +253,14 @@ public class TestAzureBlobStorageFileOutputPlugin
     }
 
     @Test
-    public void testAzureFileOutputByOpenWithRetry() throws Exception
+    public void testAzureFileOutputByOpenWithRetry()
+        throws Exception
     {
         ConfigSource configSource = config();
-        PluginTask task = configSource.loadConfig(PluginTask.class);
-        Schema schema = configSource.getNested("parser").loadConfig(CsvParserPlugin.PluginTask.class).getSchemaConfig().toSchema();
-        runner.transaction(configSource, schema, 0, new Control());
+        PluginTask task = CONFIG_MAPPER.map(configSource, PluginTask.class);
+        runner.transaction(configSource, getSchema(configSource), 0, new Control());
 
-        AzureBlobStorageFileOutputPlugin.AzureFileOutput output = (AzureBlobStorageFileOutputPlugin.AzureFileOutput) plugin.open(task.dump(), 0);
+        AzureBlobStorageFileOutputPlugin.AzureFileOutput output = (AzureBlobStorageFileOutputPlugin.AzureFileOutput) plugin.open(task.toTaskSource(), 0);
 
         output.nextFile();
 
@@ -286,21 +287,21 @@ public class TestAzureBlobStorageFileOutputPlugin
 
     public ConfigSource config()
     {
-        return Exec.newConfigSource()
-                .set("in", inputConfig())
-                .set("parser", parserConfig(schemaConfig()))
-                .set("type", "azure_blob_storage")
-                .set("account_name", AZURE_ACCOUNT_NAME)
-                .set("account_key", AZURE_ACCOUNT_KEY)
-                .set("container", AZURE_CONTAINER)
-                .set("path_prefix", AZURE_PATH_PREFIX)
-                .set("last_path", "")
-                .set("file_ext", ".csv")
-                .set("formatter", formatterConfig());
+        return runtime.getExec().newConfigSource()
+            .set("in", inputConfig())
+            .set("parser", parserConfig(schemaConfig()))
+            .set("type", "azure_blob_storage")
+            .set("account_name", AZURE_ACCOUNT_NAME)
+            .set("account_key", AZURE_ACCOUNT_KEY)
+            .set("container", AZURE_CONTAINER)
+            .set("path_prefix", AZURE_PATH_PREFIX)
+            .set("last_path", "")
+            .set("file_ext", ".csv")
+            .set("formatter", formatterConfig());
     }
 
     private class Control
-            implements OutputPlugin.Control
+        implements OutputPlugin.Control
     {
         @Override
         public List<TaskReport> run(TaskSource taskSource)
@@ -355,7 +356,8 @@ public class TestAzureBlobStorageFileOutputPlugin
         return builder.build();
     }
 
-    private void assertRecords(String azurePath) throws Exception
+    private void assertRecords(String azurePath)
+        throws Exception
     {
         ImmutableList<List<String>> records = getFileContentsFromAzure(azurePath);
         assertEquals(6, records.size());
@@ -395,7 +397,8 @@ public class TestAzureBlobStorageFileOutputPlugin
         }
     }
 
-    private ImmutableList<List<String>> getFileContentsFromAzure(String path) throws Exception
+    private ImmutableList<List<String>> getFileContentsFromAzure(String path)
+        throws Exception
     {
         Method method = AzureBlobStorageFileOutputPlugin.class.getDeclaredMethod("newAzureClient", String.class, String.class);
         method.setAccessible(true);
@@ -405,7 +408,7 @@ public class TestAzureBlobStorageFileOutputPlugin
 
         ImmutableList.Builder<List<String>> builder = new ImmutableList.Builder<>();
 
-        InputStream is =  blob.openInputStream();
+        InputStream is = blob.openInputStream();
         BufferedReader reader = new BufferedReader(new InputStreamReader(is));
         String line;
         while ((line = reader.readLine()) != null) {
@@ -416,7 +419,8 @@ public class TestAzureBlobStorageFileOutputPlugin
         return builder.build();
     }
 
-    private boolean isExistsContainer(String containerName) throws Exception
+    private boolean isExistsContainer(String containerName)
+        throws Exception
     {
         Method method = AzureBlobStorageFileOutputPlugin.class.getDeclaredMethod("newAzureClient", String.class, String.class);
         method.setAccessible(true);
@@ -425,7 +429,8 @@ public class TestAzureBlobStorageFileOutputPlugin
         return container.exists();
     }
 
-    private void deleteContainerIfExists(String containerName) throws Exception
+    private void deleteContainerIfExists(String containerName)
+        throws Exception
     {
         Method method = AzureBlobStorageFileOutputPlugin.class.getDeclaredMethod("newAzureClient", String.class, String.class);
         method.setAccessible(true);
@@ -449,10 +454,11 @@ public class TestAzureBlobStorageFileOutputPlugin
         return dir;
     }
 
-    private byte[] convertInputStreamToByte(InputStream is) throws IOException
+    private byte[] convertInputStreamToByte(InputStream is)
+        throws IOException
     {
         ByteArrayOutputStream bo = new ByteArrayOutputStream();
-        byte [] buffer = new byte[1024];
+        byte[] buffer = new byte[1024];
         while (true) {
             int len = is.read(buffer);
             if (len < 0) {
@@ -461,5 +467,33 @@ public class TestAzureBlobStorageFileOutputPlugin
             bo.write(buffer, 0, len);
         }
         return bo.toByteArray();
+    }
+
+    private Schema getSchema(ConfigSource config)
+    {
+        Schema.Builder builder = Schema.builder();
+        config.getNested("parser").get(ArrayNode.class, "columns").forEach(
+            column -> builder.add(column.get("name").asText(), getType(column.get("type").asText()))
+        );
+        return builder.build();
+    }
+
+    private Type getType(String typeName)
+    {
+        switch (typeName.toLowerCase()) {
+            case "string":
+                return Types.STRING;
+            case "long":
+                return Types.LONG;
+            case "double":
+                return Types.DOUBLE;
+            case "timestamp":
+                return Types.TIMESTAMP;
+            case "boolean":
+                return Types.BOOLEAN;
+            case "json":
+                return Types.JSON;
+        }
+        throw new ConfigException("Unsupported type " + typeName);
     }
 }
