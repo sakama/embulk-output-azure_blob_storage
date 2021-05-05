@@ -14,7 +14,7 @@ repositories {
 sourceCompatibility = 1.8
 targetCompatibility = 1.8
 
-version = "0.1.9"
+version = "0.1.10"
 
 def embulkVersion = '0.10.25'
 

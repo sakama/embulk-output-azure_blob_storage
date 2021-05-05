@@ -1,4 +1,7 @@
 ## 0.1.9 - 2019-12-09
+* [maintenance] catch up with embulk 0.10.25 [#18](https://github.com/embulk/embulk-output-azure_blob_storage/pull/18)
+
+## 0.1.9 - 2019-12-09
 * [maintenance] Fix issue of creating temporary file with nested path [#17](https://github.com/embulk/embulk-output-azure_blob_storage/pull/17)
 
 ## 0.1.8 - 2019-12-04
