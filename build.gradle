@@ -22,7 +22,7 @@ dependencies {
     compileOnly "org.embulk:embulk-api:$embulkVersion"
     compileOnly "org.embulk:embulk-spi:$embulkVersion"
 
-    compile("org.embulk:embulk-util-config:0.2.0") {
+    compile("org.embulk:embulk-util-config:0.3.0") {
         // Conflict with Embulk Core
         exclude group: 'com.fasterxml.jackson.core', module: 'jackson-annotations'
         exclude group: 'com.fasterxml.jackson.core', module: 'jackson-core'
